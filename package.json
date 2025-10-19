@@ -1,22 +1,13 @@
 {
   "name": "jobs-cz-scraper",
-  "version": "1.0.0",
-  "description": "Web scraper for jobs.cz",
+  "version": "1.0.4",
+  "description": "Web scraper pro jobs.cz",
   "main": "scraper.js",
   "scripts": {
-    "start": "node scraper.js",
-    "lambda": "node handlers/lambda-handler.js"
+    "start": "node scraper.js"
   },
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.913.0",
-    "@aws-sdk/lib-dynamodb": "^3.913.0",
-    "axios": "^0.27.2",
-    "cheerio": "^1.1.2",
-    "dotenv": "^16.6.1",
-    "puppeteer": "^24.25.0",
-    "uuid": "^9.0.1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC"
+    "puppeteer": "^22.0.0",
+    "cheerio": "^1.0.0-rc.12"
+  }
 }

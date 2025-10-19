@@ -1,94 +1,87 @@
+// scraper.js
 const puppeteer = require('puppeteer');
 const fs = require('fs');
-const { v4: uuidv4 } = require('uuid');
+const cheerio = require('cheerio'); // Nová knihovna pro parsování
 
-async function scrapeJobs() {
-  console.log('🚀 Spouštím Puppeteer...');
+// Univerzální funkce pro čekání
+const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    defaultViewport: null,
+async function scrapeJobsCz() {
+  const browser = await puppeteer.launch({ 
+    // Nastavte na false, pokud chcete vidět, jak se načítá HTML
+    headless: true, 
+    defaultViewport: null 
   });
-
+  
   const page = await browser.newPage();
+  
+  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
+  
+  await page.goto('https://www.jobs.cz/prace/', {
+    waitUntil: 'networkidle2',
+    timeout: 60000
+  });
 
-  // logování událostí pro debugging
-  page.on('console', (msg) => console.log('🧠 Browser log:', msg.text()));
-  page.on('pageerror', (err) => console.log('💥 Page error:', err.message));
-  page.on('response', (res) => {
-    if (res.url().includes('api')) {
-      console.log('📡 API volání:', res.url());
+  // --- 1. KROK: Zpracování Cookies a čekání ---
+  try {
+    const acceptButton = await page.waitForSelector('button[data-cc="accept-all"]', { timeout: 7000 });
+    
+    if (acceptButton) {
+      await acceptButton.click();
+      console.log('Cookies přijaty.');
+      await wait(1500); 
     }
-  });
-
-  const url = 'https://www.jobs.cz/prace/';
-  console.log(`🌐 Otevírám ${url}`);
-
-  try {
-    await page.goto(url, {
-      waitUntil: 'domcontentloaded', // rychlejší, vyhne se věčným network requestům
-      timeout: 45000,
-    });
-  } catch (err) {
-    console.error('❌ Chyba při načítání stránky:', err.message);
+  } catch (error) {
+    console.log('Tlačítko cookies nenalezeno nebo timeout, pokračuji bez kliknutí.');
+    await wait(1000); 
   }
 
-  // počkej, než se objeví nabídky
-  console.log('⏳ Čekám na načtení nabídek (.SerpOffer nebo [data-test="offer"]) ...');
-
-  try {
-    await page.waitForSelector('.SerpOffer, [data-test="offer"]', { timeout: 20000 });
-    console.log('✅ Nabídky načteny.');
-  } catch (err) {
-    console.error('⚠️  Nabídky se neobjevily do 20s – možná se změnil selektor.');
-    await page.screenshot({ path: 'jobscz_timeout.png', fullPage: true });
-    console.log('📸 Screenshot uložen jako jobscz_timeout.png pro kontrolu.');
-    await browser.close();
-    return;
-  }
-
-  // proveď test: kolik nabíděk vidíš v DOM
-  const offerCount = await page.$$eval('.SerpOffer, [data-test="offer"]', (els) => els.length);
-  console.log(`🔍 Počet nabídek nalezených v DOM: ${offerCount}`);
-
-  // extrahuj nabídky
-  const offers = await page.$$eval('.SerpOffer, [data-test="offer"]', (nodes) => {
-    return nodes.map((node) => {
-      const titleEl = node.querySelector('a[data-test="offer-title"], a[href*="/prace/"]');
-      const companyEl = node.querySelector('[data-test="offer-company"], .SerpOffer__company');
-      const locationEl = node.querySelector('[data-test="offer-location"], .SerpOffer__location');
-      const salaryEl = node.querySelector('[data-test="offer-salary"], .SerpOffer__salary');
-      const tags = Array.from(node.querySelectorAll('.Tag')).map((t) => t.textContent.trim());
-      return {
-        id: 'uuid-will-be-added',
-        title: titleEl ? titleEl.textContent.trim() : 'Neuvedeno',
-        url: titleEl ? titleEl.href : null,
-        company: companyEl ? companyEl.textContent.trim() : 'Neuvedeno',
-        location: locationEl ? locationEl.textContent.trim() : 'Neuvedeno',
-        salary: salaryEl ? salaryEl.textContent.trim() : 'Neuvedeno',
-        tags,
-      };
-    });
-  });
-
-  console.log(`✅ Nalezeno ${offers.length} nabídek`);
-
-  if (offers.length === 0) {
-    console.warn('⚠️  Žádné nabídky nebyly nalezeny, stránka mohla změnit strukturu.');
-    await page.screenshot({ path: 'jobscz_nooffers.png', fullPage: true });
-    console.log('📸 Screenshot uložen jako jobscz_nooffers.png.');
-  }
-
-  // přidej UUID a ulož
-  const results = offers.map((o) => ({ ...o, id: uuidv4() }));
-  const file = 'jobs-output.json';
-  fs.writeFileSync(file, JSON.stringify(results, null, 2), 'utf-8');
-  console.log(`💾 Výsledky uloženy do ${file}`);
-
+  // --- 2. KROK: Stažení celého HTML obsahu ---
+  const html = await page.content();
   await browser.close();
-  console.log('🏁 Hotovo.');
+  
+  // --- 3. KROK: Parsování obsahu pomocí Cheerio (na serveru) ---
+  const $ = cheerio.load(html);
+  const jobs = [];
+  
+  // Přesný selektor pro kontejner, kde jsou výsledky:
+  const jobElements = $('[data-e="serp-list"] > div, article.SerpOffer'); 
+
+  jobElements.each((index, element) => {
+    const job = $(element); // Cheerio element pro jednu nabídku
+    
+    // Extrakce dat uvnitř elementu:
+    const titleLinkEl = job.find('.SerpOffer__name a');
+    const companyEl = job.find('.SerpOffer__company, a.CompanyLink'); 
+    const locationEl = job.find('.SerpOffer__location'); 
+    const salaryEl = job.find('.SerpOffer__salary, [data-e="serp-salary"]');
+
+    // Helper pro bezpečné získání textu
+    const getText = (el) => {
+        const text = $(el).text().trim().replace(/\s+/g, ' ');
+        return text || 'Neuvedeno';
+    };
+
+    jobs.push({
+      id: `job-${index}-${Math.random().toString(36).substr(2, 4)}`, 
+      title: getText(titleLinkEl),
+      url: titleLinkEl.attr('href') ? `https://www.jobs.cz${titleLinkEl.attr('href')}` : null,
+      company: getText(companyEl),
+      location: getText(locationEl),
+      salary: getText(salaryEl)
+    });
+  });
+
+  console.log(`Nalezeno ${jobs.length} pracovních nabídek`);
+
+  fs.writeFileSync('jobs_jobs_cz.json', JSON.stringify(jobs, null, 2), 'utf-8');
+  
+  return jobs;
 }
 
-scrapeJobs().catch((err) => {
-  console.error('❌ Neošetřená chyba:', err);
-});
+scrapeJobsCz()
+  .then(jobs => console.log('Hotovo, data uložena do jobs_jobs_cz.json'))
+  .catch(error => {
+    console.error('Došlo k závažné chybě při scrapování:', error);
+    process.exit(1); 
+  });
