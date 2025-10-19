@@ -1,13 +1,14 @@
 {
   "name": "jobs-cz-scraper",
-  "version": "1.0.4",
-  "description": "Web scraper pro jobs.cz",
+  "version": "1.1.0",
+  "description": "Web scraper pro jobs.cz s uložením do AWS DynamoDB",
   "main": "scraper.js",
   "scripts": {
     "start": "node scraper.js"
   },
   "dependencies": {
     "puppeteer": "^22.0.0",
-    "cheerio": "^1.0.0-rc.12"
+    "cheerio": "^1.0.0-rc.12",
+    "@aws-sdk/client-dynamodb": "^3.478.0"
   }
 }
