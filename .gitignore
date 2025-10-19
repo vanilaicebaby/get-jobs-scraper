@@ -1,2 +1,5 @@
-.env
+# Ignorování složky s moduly (Node.js/npm)
 /node_modules
+
+# Ignorování souboru s proměnnými prostředí
+.env
